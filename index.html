@@ -1,0 +1,775 @@
+<!doctype html>
+<html lang="sv">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Fiktiv Teams-chatt (demo)</title>
+  <meta name="description" content="En animerad, konfigurerbar fiktiv Teams-chatt att lägga på GitHub Pages. Editera deltagare och meddelanden i inbäddad JSON eller via messages.json." />
+  <style>
+    :root{
+      /* Justera färger vid behov */
+      --bg:#f3f2f1;              /* Teams-liknande bakgrund */
+      --card:#fff;               /* kort/bubblor */
+      --muted:#616161;          /* sekundär text */
+      --text:#202124;           /* primär text */
+      --border:#e6e6e6;
+      --me:#6264a7;             /* "min" bubbel-färg (Teams-lila) */
+      --me-text:#fff;
+      --others:#ffffff;         /* andras bubbel-färg */
+      --others-text:#202124;
+      --accent:#4f52b2;         /* knappar/markering */
+      --system-join:#22c55e;    /* grön för anslutning */
+      --system-remove:#ef4444;  /* röd för borttagning */
+    }
+    *{box-sizing:border-box}
+    html,body{height:100%}
+    body{
+      margin:0; background:var(--bg); color:var(--text); font:16px/1.45 system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+      display:flex; flex-direction:column;
+    }
+    header{
+      position:sticky; top:0; z-index:10;
+      background:linear-gradient(180deg,#fff,rgba(255,255,255,.95));
+      border-bottom:1px solid var(--border);
+      padding:.75rem 1rem; display:flex; align-items:center; gap:.75rem;
+    }
+    .dot{width:8px;height:8px;background:#7f7f7f;border-radius:999px;display:inline-block}
+    .title{font-weight:700}
+    .tag{font-size:.8rem;color:var(--muted)}
+    .controls{margin-left:auto;display:flex;gap:.5rem;align-items:center}
+    button, .btn{border:1px solid var(--border); background:#fff; border-radius:.75rem; padding:.4rem .7rem; cursor:pointer}
+    button:hover{border-color:#cfcfcf}
+    main{flex:1; display:flex; flex-direction:column;}
+    .chat{
+      flex:1; height:0; overflow-y:auto; padding:1rem; display:flex; flex-direction:column; gap:.5rem;
+      min-height:400px; max-height:calc(100vh - 120px);
+    }
+    /* Systemrad (datumlinjal och anslutningsmeddelanden) */
+    .system{
+      align-self:center; font-size:.82rem; color:var(--muted); background:#fff; 
+      border:1px solid var(--border); padding:.2rem .6rem; border-radius:999px; margin:.5rem 0
+    }
+    
+    /* Systemmeddelanden för anslutning/borttagning */
+    .system.join{
+      color:#166534; background:#dcfce7; border-color:#bbf7d0;
+    }
+    .system.remove{
+      color:#991b1b; background:#fecaca; border-color:#fca5a5;
+    }
+
+    /* Meddelanderad */
+    .row{display:flex; gap:.5rem; align-items:flex-end;}
+    .row.me{justify-content:flex-end}
+
+    .avatar{
+      width:36px; height:36px; border-radius:50%; flex:0 0 36px;
+      display:grid; place-items:center; font-weight:600; color:#fff;
+      background:#888; user-select:none;
+      box-shadow:0 1px 0 rgba(0,0,0,.04);
+    }
+
+    .bubble{
+      position:relative; max-width:min(700px,80%); padding:.55rem .7rem; border-radius:1rem; box-shadow:0 1px 0 rgba(0,0,0,.05); border:1px solid var(--border);
+      background:var(--others); color:var(--others-text);
+    }
+    .me .bubble{ background:var(--me); color:var(--me-text); border-color:transparent }
+
+    .name{font-size:.78rem; font-weight:700; margin-bottom:.15rem; opacity:.9}
+    .text{white-space:pre-wrap}
+    .meta{display:flex; gap:.4rem; align-items:center; font-size:.72rem; opacity:.8; margin-top:.25rem}
+
+    /* Skrivindikator */
+    .typing{
+      display:inline-flex; gap:.32rem; align-items:center; padding:.25rem .45rem; border-radius:.75rem; background:#e9e9ee; border:1px solid #dad9e0; color:#555; font-weight:600;
+    }
+    .typing .dot{animation:blink 1.3s infinite ease-in-out}
+    .typing .dot:nth-child(2){animation-delay:.15s}
+    .typing .dot:nth-child(3){animation-delay:.3s}
+    @keyframes blink{0%,80%,100%{opacity:.15; transform:translateY(0)}40%{opacity:1; transform:translateY(-2px)}}
+
+    /* Speciella meddelandetyper */
+    .gif-container {
+      margin-top: .5rem; border-radius: .75rem; overflow: hidden; max-width: 300px;
+      box-shadow: 0 2px 8px rgba(0,0,0,.12);
+    }
+    .gif-container img {
+      width: 100%; height: auto; display: block;
+    }
+    
+    .image-container {
+      margin-top: .5rem; border-radius: .75rem; overflow: hidden; max-width: 400px;
+      box-shadow: 0 2px 8px rgba(0,0,0,.12); cursor: pointer;
+      transition: all 0.2s ease;
+    }
+    .image-container:hover {
+      transform: translateY(-2px); box-shadow: 0 4px 16px rgba(0,0,0,.15);
+    }
+    .image-container img {
+      width: 100%; height: auto; display: block; transition: transform 0.2s ease;
+    }
+    .image-container:hover img {
+      transform: scale(1.02);
+    }
+    .image-caption {
+      padding: .5rem .75rem; background: rgba(0,0,0,.05); 
+      font-size: .8rem; color: var(--muted); font-style: italic;
+    }
+    .image-error {
+      padding: 1rem; background: #f8f9fa; border: 2px dashed #dee2e6;
+      text-align: center; color: var(--muted); font-size: .8rem;
+    }
+    
+    /* Svar/Reply funktionalitet */
+    .reply-container {
+      margin-bottom: .5rem; padding: .4rem .6rem; 
+      border-left: 3px solid var(--accent); background: rgba(79, 82, 178, 0.08);
+      border-radius: 0 .5rem .5rem 0; font-size: .8rem;
+    }
+    .reply-author {
+      font-weight: 600; color: var(--accent); margin-bottom: .15rem;
+    }
+    .reply-text {
+      color: var(--muted); line-height: 1.3; 
+      overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; 
+      -webkit-box-orient: vertical;
+    }
+    .me .reply-container {
+      border-left-color: rgba(255,255,255,0.7);
+      background: rgba(255,255,255,0.15);
+    }
+    .me .reply-author {
+      color: rgba(255,255,255,0.9);
+    }
+    .me .reply-text {
+      color: rgba(255,255,255,0.7);
+    }
+    
+    .link-preview {
+      margin-top: .5rem; border: 1px solid var(--border); border-radius: .75rem; 
+      background: #f8f9fa; padding: .75rem; max-width: 350px; cursor: pointer;
+      transition: all 0.2s ease;
+    }
+    .link-preview:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(0,0,0,.1); }
+    .link-preview .link-title {
+      font-weight: 600; color: var(--accent); margin-bottom: .25rem; font-size: .9rem;
+    }
+    .link-preview .link-desc {
+      color: var(--muted); font-size: .8rem; line-height: 1.3;
+    }
+    .link-preview .link-url {
+      color: var(--accent); font-size: .75rem; margin-top: .25rem; text-decoration: none;
+    }
+    
+    .attachment {
+      margin-top: .5rem; display: flex; align-items: center; gap: .75rem;
+      padding: .75rem; border: 1px solid var(--border); border-radius: .75rem;
+      background: #f8f9fa; max-width: 280px; cursor: pointer;
+      transition: all 0.2s ease;
+    }
+    .attachment:hover { background: #f0f1f2; transform: translateY(-1px); }
+    .attachment-icon {
+      width: 40px; height: 40px; border-radius: .5rem; display: grid; place-items: center;
+      font-weight: 700; color: #fff; font-size: .8rem;
+    }
+    .attachment-info .name { font-weight: 600; font-size: .85rem; }
+    .attachment-info .size { color: var(--muted); font-size: .75rem; }
+    
+    .reaction-container {
+      margin-top: .5rem; display: flex; gap: .25rem; flex-wrap: wrap;
+    }
+    .reaction {
+      position: relative;
+      display: inline-flex; align-items: center; gap: .25rem; padding: .15rem .4rem;
+      background: #e3f2fd; border: 1px solid #bbdefb; border-radius: .75rem;
+      font-size: .75rem; color: #1976d2; cursor: pointer;
+      transition: all 0.2s ease;
+      animation: reactionPop 0.3s ease-out;
+    }
+    .reaction:hover { 
+      background: #bbdefb; transform: scale(1.05); 
+    }
+    .reaction:hover .reaction-tooltip {
+      opacity: 1; visibility: visible; transform: translateY(-100%) translateX(-50%);
+    }
+    
+    .reaction-tooltip {
+      position: absolute; top: -5px; left: 50%; transform: translateX(-50%);
+      background: #333; color: white; padding: .25rem .5rem; border-radius: .375rem;
+      font-size: .65rem; white-space: nowrap; z-index: 20;
+      opacity: 0; visibility: hidden; transition: all 0.2s ease;
+    }
+    .reaction-tooltip::after {
+      content: ''; position: absolute; top: 100%; left: 50%; transform: translateX(-50%);
+      border: 4px solid transparent; border-top-color: #333;
+    }
+    
+    @keyframes reactionPop {
+      0% { transform: scale(0) rotate(180deg); }
+      80% { transform: scale(1.1) rotate(-10deg); }
+      100% { transform: scale(1) rotate(0deg); }
+    }
+    
+    .voice-message {
+      margin-top: .5rem; display: flex; align-items: center; gap: .75rem;
+      padding: .5rem .75rem; background: #f0f4ff; border-radius: .75rem;
+      border: 1px solid #d1d9ff; max-width: 250px;
+    }
+    .voice-play-btn {
+      width: 32px; height: 32px; border-radius: 50%; background: var(--accent);
+      color: white; border: none; display: grid; place-items: center; cursor: pointer;
+      transition: all 0.2s ease;
+    }
+    .voice-play-btn:hover { background: #3d4ed8; transform: scale(1.05); }
+    .voice-duration {
+      color: var(--muted); font-size: .8rem; font-weight: 500;
+    }
+
+    /* Footer info */
+    footer{padding:.5rem 1rem; color:var(--muted); font-size:.8rem; display:flex; gap:1rem; align-items:center; border-top:1px solid var(--border); background:#fff}
+    code.inline{background:#f5f5f7;border:1px solid #e9e9ef;border-radius:.4rem;padding:.1rem .35rem}
+
+    /* Liten skärm: minska maxbredd */
+    @media (max-width:600px){ 
+      .bubble{max-width:86%} 
+      .gif-container, .image-container, .link-preview, .attachment { max-width: 250px; }
+      .voice-message { max-width: 200px; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="dot"></div><div class="dot"></div><div class="dot"></div>
+    <div class="title">Teamets chatt</div>
+    <div class="tag" id="roomTag">#projekt-kanal</div>
+    <div class="controls">
+      <button id="btnRestart" title="Starta om">↻ Spela igen</button>
+      <button id="btnPause" title="Pausa/fortsätt">⏯︎ Pausa</button>
+      <label class="tag"><input type="checkbox" id="chkLoop"/> Loop</label>
+      <span class="tag">Hastighet
+        <select id="speed">
+          <option value="1">1x</option>
+          <option value="1.5">1.5x</option>
+          <option value="2">2x</option>
+        </select>
+      </span>
+    </div>
+  </header>
+  <main>
+    <div id="chat" class="chat" aria-live="polite" aria-atomic="false"></div>
+  </main>
+
+  <!-- ===== Inbäddad data (fallback om messages.json saknas) ===== -->
+  <script type="application/json" id="chat-data">
+  {
+    "room": "#projekt-kanal",
+    "startsAt": "2025-08-15T09:00:00+02:00",
+    "timezone": "Europe/Stockholm",
+    "me": "susanne",
+    "participants": [
+      {"id":"susanne","name":"Susanne Afzelius","color":"#6a6cc7"},
+      {"id":"annsofie","name":"Ann-Sofie Stendalen","color":"#d17a22"},
+      {"id":"robin","name":"Robin Ingbrandt","color":"#1f8f77"},
+      {"id":"christian","name":"Christian Vestas","color":"#0d9488"},
+      {"id":"tony","name":"Tony Ring","color":"#7c3aed"}
+    ],
+    "timeline": [
+      {"type":"system","text":"Fredag 15 augusti"},
+      {"type":"join","user":"susanne","delayMs":1000},
+      {"type":"join","user":"annsofie","delayMs":2000},
+      {"type":"typing","from":"susanne","ms":1200},
+      {"type":"message","from":"susanne","text":"Tjohoo gänget! Dags att planera ledardag för hösten!","delayMs":5000},
+      {"type":"typing","from":"annsofie","ms":900},
+      {"type":"message","from":"annsofie","text":"Yes! Äntligen!🥳","delayMs":5000},
+      {"type":"join","user":"robin","delayMs":3000},
+      {"type":"typing","from":"robin","ms":1100},
+      {"type":"message","from":"robin","text":"Skickar in en liten brasklapp här. Kolla så allt är upphandlat. Tips från coachen typ 😉","delayMs":5000},
+      {"type":"join","user":"christian","delayMs":2000},
+      {"type":"typing","from":"christian","ms":1500},
+      {"type":"message","from":"christian","text":"Budgeten ser tight ut, om något ska bokas ta något billigt 🫣.","delayMs":6000},
+      {"type":"join","user":"tony","delayMs":1500},
+      {"type":"typing","from":"tony","ms":1200},
+      {"type":"typing","from":"christian","ms":800},
+      {"type":"message","from":"christian","text":"Alltså det finns en slant men inga fantasisummor 🤑","delayMs":250},
+      {"type":"typing","from":"robin","ms":1200},
+      {"type":"message","from":"robin","text":"#snålOve🤪","mediaData":{"replyTo":{"from":"christian","text":"Alltså det finns en slant men inga fantasisummor 🤑"}},"delayMs":3000},
+      {"type":"typing","from":"tony","ms":800},
+      {"type":"message","from":"tony","text":"Jag kan köra en stund för typ 10 000 🤑","delayMs":2000},
+      {"type":"typing","from":"susanne","ms":1000},
+      {"type":"message","from":"susanne","text":"Nej tack Tony, vi klarar oss utan dig👋","mediaData":{"replyTo":{"from":"tony","text":"Jag kan köra en stund för typ 10 000 🤑"}},"delayMs":4000},
+      {"type":"remove","removedBy":"susanne","removedUser":"tony","delayMs":3000}
+     {"type":"message","from":"robin","text":"Hahaha 😂 Okej men nu på allvar då. Vi behöver planera för 23 oktober. Alla chefer, förmiddag + lunch.","delayMs":7000},
+      {"type":"typing","from":"christian","ms":1200},
+      {"type":"message","from":"christian","text":"Tema: ledarskap, tillit, kultur och kommunikation. Låter som en vanlig tisdag här 😅","delayMs":5000},
+      {"type":"typing","from":"annsofie","ms":900},
+      {"type":"message","from":"annsofie","text":"Säg inte det Christian! Vi har ju JÄTTEBRA kultur här! 😤","mediaData":{"replyTo":{"from":"christian","text":"Tema: ledarskap, tillit, kultur och kommunikation. Låter som en vanlig tisdag här 😅"}},"delayMs":4000},
+      {"type":"typing","from":"robin","ms":1500},
+      {"type":"message","from":"robin","text":"Okej, första frågan: VAR ska vi ha det? Någon som har förslag?","delayMs":6000},
+      {"type":"typing","from":"christian","ms":2200},
+      {"type":"message","from":"christian","text":"Vita huset? Jag menar, om vi ska prata ledarskap så kan vi ju lika gärna göra det ordentligt 🏛️","delayMs":8000},
+      {"type":"typing","from":"annsofie","ms":800},
+      {"type":"message","from":"annsofie","text":"CHRISTIAN! 😂","delayMs":3000},
+      {"type":"typing","from":"robin","ms":1000},
+      {"type":"message","from":"robin","text":"Ja precis, och jag fixar upphandlingen av Air Force One också medan jag håller på 🛩️","mediaData":{"replyTo":{"from":"christian","text":"Vita huset? Jag menar, om vi ska prata ledarskap så kan vi ju lika gärna göra det ordentligt 🏛️"}},"delayMs":5000},
+      {"type":"typing","from":"susanne","ms":1800},
+      {"type":"message","from":"susanne","text":"Kan vi inte bara flytta till Slottet direkt? Knugen lär väl förstå 👑","delayMs":7000},
+      {"type":"typing","from":"christian","ms":1400},
+      {"type":"message","from":"christian","text":"'Hej Kungen, vi behöver låna slottet för vår ledardag. Mvh Karlskoga kommun' 📧","delayMs":6000},
+      {"type":"typing","from":"annsofie","ms":1100},
+      {"type":"message","from":"annsofie","text":"Skicka med en hälsning från mig! Vi träffades på ICA en gång 🛒","delayMs":5000},
+      {"type":"typing","from":"robin","ms":2000},
+      {"type":"message","from":"robin","text":"Ann-Sofie... va? 😅 Okej kan vi komma tillbaka till verkligheten? Vi behöver faktiska förslag","delayMs":8000},
+      {"type":"typing","from":"christian","ms":1600},
+      {"type":"message","from":"christian","text":"Vad sägs om rymdstationen? Perfekt för att få lite perspektiv på våra utmaningar 🚀","delayMs":7000},
+      {"type":"typing","from":"susanne","ms":1000},
+      {"type":"message","from":"susanne","text":"Christian, sluta nu 😂","delayMs":4000},
+      {"type":"typing","from":"annsofie","ms":1800},
+      {"type":"message","from":"annsofie","text":"Eller Mount Everest! Inget bygger teamwork som gemensam syrebrist! ⛰️","delayMs":7000},
+      {"type":"typing","from":"robin","ms":2200},
+      {"type":"message","from":"robin","text":"Okej nu räcker det 😂 Vad sägs om något lite mer... jordnära? Typ inom Karlskoga kommun kanske?","delayMs":8000},
+      {"type":"typing","from":"christian","ms":1200},
+      {"type":"message","from":"christian","text":"Åh, tråkigt. Vad sägs om kommunhuset då? Vi har ju redan tillgång 🏢","delayMs":5000},
+      {"type":"typing","from":"susanne","ms":1400},
+      {"type":"message","from":"susanne","text":"I vårt eget hus? Det blir ju som att ha semester hemma i sovrummet","delayMs":6000},
+      {"type":"typing","from":"annsofie","ms":1100},
+      {"type":"message","from":"annsofie","text":"Vad sägs om Karlskoga folkhögskola? Bra lokaler, nära, och de har säkert kaffe ☕","delayMs":5000},
+      {"type":"typing","from":"robin","ms":1600},
+      {"type":"message","from":"robin","text":"Äntligen ett vettigt förslag! Folkhögskolan har bra faciliteter och ligger bra till","delayMs":7000},
+      {"type":"typing","from":"christian","ms":1000},
+      {"type":"message","from":"christian","text":"Och viktigast av allt - det kostar inte som Vita huset 💰","delayMs":4000},
+      {"type":"typing","from":"susanne","ms":1800},
+      {"type":"message","from":"susanne","text":"Håller med! Plus att det känns passande med 'lära sig ledarskap' på en skola 🎓","delayMs":7000},
+      {"type":"typing","from":"annsofie","ms":1200},
+      {"type":"message","from":"annsofie","text":"Jag kollar läget med dem imorgon! Ska se vad de kan erbjuda","delayMs":5000},
+      {"type":"typing","from":"robin","ms":1500},
+      {"type":"message","from":"robin","text":"Perfekt! Men kom ihåg - följ upphandlingsreglerna. Vi kan inte bara säga 'hej, vi vill hyra' 📋","delayMs":6000},
+      {"type":"typing","from":"christian","ms":1800},
+      {"type":"message","from":"christian","text":"Robin och sina regler 🙄 Nästa gång ska vi nog upphandla toalettpapper enligt LOU","mediaData":{"replyTo":{"from":"robin","text":"Perfekt! Men kom ihåg - följ upphandlingsreglerna. Vi kan inte bara säga 'hej, vi vill hyra' 📋"}},"delayMs":7000},
+      {"type":"typing","from":"robin","ms":1000},
+      {"type":"message","from":"robin","text":"Det GÖR vi redan Christian! 🧻","delayMs":4000},
+      {"type":"typing","from":"annsofie","ms":900},
+      {"type":"message","from":"annsofie","text":"😂😂😂","delayMs":3000},
+      {"type":"typing","from":"susanne","ms":2000},
+      {"type":"message","from":"susanne","text":"Okej, så vi är överens om folkhögskolan? Vad händer nu sedan?","delayMs":8000},
+      {"type":"typing","from":"annsofie","ms":1400},
+      {"type":"message","from":"annsofie","text":"Jag kollar med dem imorgon om 23 oktober är ledigt. Förmiddag 9-13 med lunch?","delayMs":6000},
+      {"type":"typing","from":"christian","ms":1200},
+      {"type":"message","from":"christian","text":"Låter bra! Vad kostar det? Måste ju hålla koll på pengarna 💸","delayMs":5000},
+      {"type":"typing","from":"robin","ms":1800},
+      {"type":"message","from":"robin","text":"Christian, vi vet inte än! Ann-Sofie får kolla först. Men ja, vi behöver tre offerter minst","delayMs":7000},
+      {"type":"typing","from":"susanne","ms":1600},
+      {"type":"message","from":"susanne","text":"Tre offerter för att hyra en sal? Robin du är omöjlig 😅","mediaData":{"replyTo":{"from":"robin","text":"Christian, vi vet inte än! Ann-Sofie får kolla först. Men ja, vi behöver tre offerter minst"}},"delayMs":6000},
+      {"type":"typing","from":"robin","ms":1200},
+      {"type":"message","from":"robin","text":"Det är REGLERNA Susanne! Över 100 000 kr = upphandling. Under det = tre offerter!","delayMs":5000},
+      {"type":"typing","from":"christian","ms":1400},
+      {"type":"message","from":"christian","text":"100 000?! För EN förmiddag? Vad ska vi göra, bygga skolan från grunden? 🏗️","delayMs":6000},
+      {"type":"typing","from":"annsofie","ms":1000},
+      {"type":"message","from":"annsofie","text":"Lugn! Det blir inte ens nära. Tänker typ 5-10 tusen max","delayMs":4000},
+      {"type":"typing","from":"christian","ms":800},
+      {"type":"message","from":"christian","text":"Då slipper vi Robin's byråkrati-mardröm! 🎉","delayMs":3000},
+      {"type":"typing","from":"robin","ms":1600},
+      {"type":"message","from":"robin","text":"Det heter 'rättssäkerhet' Christian. Men okej, jag är nöjd med tre offerter 📝","delayMs":7000},
+      {"type":"typing","from":"susanne","ms":1800},
+      {"type":"message","from":"susanne","text":"Bra! Så Ann-Sofie kollar folkhögskolan, skaffar två alternativ till, och så väljer vi. Deal?","delayMs":7000},
+      {"type":"typing","from":"annsofie","ms":1200},
+      {"type":"message","from":"annsofie","text":"Deal! Fast jag har redan bestämt mig för folkhögskolan 😉","delayMs":5000},
+      {"type":"typing","from":"christian","ms":1000},
+      {"type":"message","from":"christian","text":"Såpass för demokrati! 😂","delayMs":4000},
+      {"type":"typing","from":"robin","ms":1400},
+      {"type":"message","from":"robin","text":"Så länge papperen är i ordning så är jag nöjd 📊","delayMs":6000},
+      {"type":"typing","from":"susanne","ms":2000},
+      {"type":"message","from":"susanne","text":"Perfekt! Nu får vi börja fundera på vad vi faktiskt ska göra där. Men det får bli en annan dag","delayMs":8000},
+      {"type":"typing","from":"annsofie","ms":900},
+      {"type":"message","from":"annsofie","text":"Ja! Ledarskap, tillit, kultur och kommunikation. Easy! 😎","delayMs":4000},
+      {"type":"typing","from":"christian","ms":1200},
+      {"type":"message","from":"christian","text":"Bara vi inte slutar på Everest eller i rymden så är jag nöjd 🌍","delayMs":5000},
+      {"type":"typing","from":"robin","ms":800},
+      {"type":"message","from":"robin","text":"Haha! Men vem vet, kanske vi hyr en simulator? 🚀","delayMs":3000},
+      {"type":"typing","from":"susanne","ms":1000},
+      {"type":"message","from":"susanne","text":"ROBIN! Sluta ge Christian idéer! 😂","delayMs":4000},
+      {"type":"typing","from":"christian","ms":1400},
+      {"type":"message","from":"christian","text":"För sent! Jag kollar redan NASA:s prislista... 👨‍🚀","delayMs":6000},
+      {"type":"typing","from":"annsofie","ms":1100},
+      {"type":"message","from":"annsofie","text":"Okej nu stänger jag chatten innan ni hittar på att boka Eiffeltornet! 🗼","delayMs":5000},
+      {"type":"typing","from":"christian","ms":1600},
+      {"type":"message","from":"christian","text":"Vänta! Paris låter faktiskt inte så dumt... För teambuilding såklart! 🥐","delayMs":7000},
+      {"type":"typing","from":"susanne","ms":800},
+      {"type":"message","from":"susanne","text":"CHRISTIAN! 😤","delayMs":3000},
+      {"type":"typing","from":"robin","ms":1800},
+      {"type":"message","from":"robin","text":"Jag drar upp upphandlingsreglerna för internationella resor nu direkt... 📚","delayMs":7000},
+      {"type":"typing","from":"annsofie","ms":1200},
+      {"type":"message","from":"annsofie","text":"Seriöst nu! Karlskoga folkhögskola. 23 oktober. 9-13. Lunch. PUNKT!","delayMs":5000},
+      {"type":"typing","from":"christian","ms":900},
+      {"type":"message","from":"christian","text":"Okej okej... men kan vi åtminstone ha croissanter till lunchen? 🥐","delayMs":4000},
+      {"type":"typing","from":"susanne","ms":1400},
+      {"type":"message","from":"susanne","text":"Om det hjälper dig att sluta fantisera om Paris så... ja 😂","mediaData":{"replyTo":{"from":"christian","text":"Okej okej... men kan vi åtminstone ha croissanter till lunchen? 🥐"}},"delayMs":6000},
+      {"type":"typing","from":"robin","ms":1000},
+      {"type":"message","from":"robin","text":"Måste jag upphandla bagerivaror också nu? 🥖","delayMs":4000},
+      {"type":"typing","from":"annsofie","ms":800},
+      {"type":"message","from":"annsofie","text":"Robin, slappna av! Vi köper på ICA 😅","delayMs":3000},
+      {"type":"typing","from":"christian","ms":1200},
+      {"type":"message","from":"christian","text":"ICA-croissanter... Från Paris-drömmar till... det här 📉","delayMs":5000},
+      {"type":"typing","from":"susanne","ms":1600},
+      {"type":"message","from":"susanne","text":"Så, sammanfattning: Ann-Sofie bokar folkhögskolan för 23 oktober, vi planerar program nästa vecka, och Christian får sina croissanter","delayMs":7000},
+      {"type":"typing","from":"annsofie","ms":1000},
+      {"type":"message","from":"annsofie","text":"Perfekt! Och Robin får sina papper i ordning 📋","delayMs":4000},
+      {"type":"typing","from":"robin","ms":1200},
+      {"type":"message","from":"robin","text":"Exakt! Allt enligt lag och förordning 👨‍⚖️","delayMs":5000},
+      {"type":"typing","from":"christian","ms":1400},
+      {"type":"message","from":"christian","text":"Och jag får drömma om Paris medan jag äter ICA-croissanter... Livet är hårt 💔","delayMs":6000},
+      {"type":"typing","from":"susanne","ms":900},
+      {"type":"message","from":"susanne","text":"Stackare! 😂 Vi hörs nästa vecka för att planera innehållet!","delayMs":4000},
+      {"type":"typing","from":"annsofie","ms":800},
+      {"type":"message","from":"annsofie","text":"Ja! Och jag har svaret från folkhögskolan på måndag","delayMs":3000},
+      {"type":"typing","from":"robin","ms":1000},
+      {"type":"message","from":"robin","text":"Bra! Då kan vi gå vidare med beställning... eh, 'direktupphandling' 😉","delayMs":4000},
+      {"type":"typing","from":"christian","ms":1200},
+      {"type":"message","from":"christian","text":"Robin, du kommer säga 'upphandling' på dödsbädden också va? 😂","delayMs":5000},
+      {"type":"typing","from":"robin","ms":800},
+      {"type":"message","from":"robin","text":"'Jag härmed upphandlar... min sista andetag...' ⚰️","delayMs":3000},
+      {"type":"typing","from":"annsofie","ms":900},
+      {"type":"message","from":"annsofie","text":"ROBIN! 😂😂😂","delayMs":3000},
+      {"type":"typing","from":"susanne","ms":1400},
+      {"type":"message","from":"susanne","text":"Okej nu drar jag! Vi ses på måndag och planerar världens bästa ledardag! 💪","delayMs":6000},
+      {"type":"typing","from":"christian","ms":1000},
+      {"type":"message","from":"christian","text":"Ja! Fast på Karlskoga folkhögskola... inte i Paris 😢","delayMs":4000},
+      {"type":"typing","from":"annsofie","ms":800},
+      {"type":"message","from":"annsofie","text":"Ha det bra allesammans! ✋","delayMs":3000},
+      {"type":"typing","from":"robin","ms":1000},
+      {"type":"message","from":"robin","text":"Vi hörs! Och kom ihåg - dokumentera allt! 📝","delayMs":4000},
+      {"type":"typing","from":"christian","ms":1200},
+      {"type":"message","from":"christian","text":"Hejdå! Jag ska googla 'Paris virtual reality' nu... för teambuilding såklart 🥽","delayMs":5000},
+      {"type":"typing","from":"susanne","ms":800},
+      {"type":"message","from":"susanne","text":"CHRISTIAN! 😂 Hejdå gänget! 👋","delayMs":3000}
+   
+    ]
+  }
+  </script>
+
+  <script>
+  // ====== Hjälpfunktioner ======
+  const $ = (sel, ctx=document) => ctx.querySelector(sel);
+  const $$ = (sel, ctx=document) => Array.from(ctx.querySelectorAll(sel));
+  const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+
+  function initials(name){
+    return name.split(/\s+/).map(p=>p[0]).join('').slice(0,2).toUpperCase();
+  }
+
+  function fmtTime(date){
+    try{ return new Intl.DateTimeFormat(undefined,{hour:'2-digit',minute:'2-digit'}).format(date); }
+    catch{ return date.toLocaleTimeString().slice(0,5) }
+  }
+
+  // ====== Ladda data (messages.json eller inbäddat) ======
+  async function loadData(){
+    const urlParam = new URLSearchParams(location.search);
+    const external = urlParam.get('src') || 'messages.json';
+    try{
+      const res = await fetch(external, {cache:'no-store'});
+      if(res.ok){
+        const json = await res.json();
+        return json;
+      }
+      throw new Error('Ingen extern messages.json');
+    }catch(err){
+      const fallback = JSON.parse(document.getElementById('chat-data').textContent);
+      return fallback;
+    }
+  }
+
+  // ====== Renderare ======
+  function makeRow({me, p, text, time, typing=false, messageType='text', mediaData=null, participants=null}){
+    const row = document.createElement('div');
+    row.className = 'row' + (me ? ' me' : '');
+
+    const avatar = document.createElement('div');
+    avatar.className = 'avatar';
+    avatar.style.background = p.color || '#888';
+    avatar.textContent = initials(p.name || p.id || '?');
+
+    const bubble = document.createElement('div');
+    bubble.className = 'bubble';
+
+    if(typing){
+      const w = document.createElement('div');
+      w.className = 'typing';
+      w.innerHTML = '<span class="dot"></span><span class="dot"></span><span class="dot"></span>';
+      bubble.appendChild(w);
+    } else {
+      const name = document.createElement('div');
+      name.className = 'name';
+      name.textContent = p.name || p.id || 'Okänd';
+      
+      const txt = document.createElement('div');
+      txt.className = 'text';
+      txt.textContent = text;
+      
+      bubble.appendChild(name);
+      bubble.appendChild(txt);
+      
+      // Lägg till svar/reply om det finns
+      if(mediaData && mediaData.replyTo) {
+        const replyContainer = document.createElement('div');
+        replyContainer.className = 'reply-container';
+        
+        const replyAuthor = document.createElement('div');
+        replyAuthor.className = 'reply-author';
+        
+        // Hitta den användare som svaret refererar till
+        const repliedUser = participants ? participants.find(p => p.id === mediaData.replyTo.from) : null;
+        replyAuthor.textContent = repliedUser ? repliedUser.name : mediaData.replyTo.from;
+        
+        const replyText = document.createElement('div');
+        replyText.className = 'reply-text';
+        replyText.textContent = mediaData.replyTo.text;
+        
+        replyContainer.appendChild(replyAuthor);
+        replyContainer.appendChild(replyText);
+        
+        // Lägg till reply-containern före huvudtexten
+        bubble.insertBefore(replyContainer, txt);
+      }
+      
+      // Lägg till speciellt innehåll baserat på meddelandetyp
+      if(messageType === 'gif' && mediaData) {
+        const gifContainer = document.createElement('div');
+        gifContainer.className = 'gif-container';
+        const img = document.createElement('img');
+        img.src = mediaData.url;
+        img.alt = mediaData.alt || 'GIF';
+        img.loading = 'lazy';
+        gifContainer.appendChild(img);
+        bubble.appendChild(gifContainer);
+      }
+      
+      if(messageType === 'image' && mediaData) {
+        const imageContainer = document.createElement('div');
+        imageContainer.className = 'image-container';
+        
+        const img = document.createElement('img');
+        img.src = mediaData.url;
+        img.alt = mediaData.alt || 'Bild';
+        img.loading = 'lazy';
+        
+        // Felhantering för bilder
+        img.onerror = function() {
+          imageContainer.innerHTML = `
+            <div class="image-error">
+              🖼️ Kunde inte ladda bilden<br>
+              <small>${mediaData.url}</small>
+            </div>
+          `;
+        };
+        
+        imageContainer.appendChild(img);
+        
+        // Lägg till caption om det finns
+        if(mediaData.caption) {
+          const caption = document.createElement('div');
+          caption.className = 'image-caption';
+          caption.textContent = mediaData.caption;
+          imageContainer.appendChild(caption);
+        }
+        
+        bubble.appendChild(imageContainer);
+      }
+      
+      if(messageType === 'link' && mediaData) {
+        const linkPreview = document.createElement('div');
+        linkPreview.className = 'link-preview';
+        linkPreview.innerHTML = `
+          <div class="link-title">${mediaData.title}</div>
+          <div class="link-desc">${mediaData.description}</div>
+          <a href="${mediaData.url}" class="link-url" target="_blank">${mediaData.domain}</a>
+        `;
+        bubble.appendChild(linkPreview);
+      }
+      
+      if(messageType === 'attachment' && mediaData) {
+        const attachment = document.createElement('div');
+        attachment.className = 'attachment';
+        const iconBg = mediaData.type === 'pdf' ? '#e53e3e' : 
+                     mediaData.type === 'doc' ? '#2b6cb0' : 
+                     mediaData.type === 'xls' ? '#38a169' : '#6b46c1';
+        attachment.innerHTML = `
+          <div class="attachment-icon" style="background:${iconBg}">
+            ${mediaData.type.toUpperCase()}
+          </div>
+          <div class="attachment-info">
+            <div class="name">${mediaData.filename}</div>
+            <div class="size">${mediaData.size}</div>
+          </div>
+        `;
+        bubble.appendChild(attachment);
+      }
+      
+      if(messageType === 'voice' && mediaData) {
+        const voiceMsg = document.createElement('div');
+        voiceMsg.className = 'voice-message';
+        voiceMsg.innerHTML = `
+          <button class="voice-play-btn">▶</button>
+          <div style="flex:1; height:20px; background:#ddd; border-radius:10px; position:relative;">
+            <div style="width:${mediaData.progress||30}%; height:100%; background:var(--accent); border-radius:10px;"></div>
+          </div>
+          <div class="voice-duration">${mediaData.duration}</div>
+        `;
+        bubble.appendChild(voiceMsg);
+      }
+      
+      if(mediaData && mediaData.reactions) {
+        const reactionContainer = document.createElement('div');
+        reactionContainer.className = 'reaction-container';
+        mediaData.reactions.forEach(reaction => {
+          const reactionEl = document.createElement('span');
+          reactionEl.className = 'reaction';
+          
+          // Skapa tooltip med namn på användare som reagerat
+          const userNames = reaction.users ? reaction.users.map(userId => {
+            const user = participants ? participants.find(p => p.id === userId) : null;
+            return user ? user.name : userId;
+          }).join(', ') : 'Okända användare';
+          
+          reactionEl.innerHTML = `
+            ${reaction.emoji} ${reaction.count}
+            <div class="reaction-tooltip">${userNames}</div>
+          `;
+          reactionContainer.appendChild(reactionEl);
+        });
+        bubble.appendChild(reactionContainer);
+      }
+      
+      const meta = document.createElement('div');
+      meta.className = 'meta';
+      meta.textContent = fmtTime(time);
+      bubble.appendChild(meta);
+    }
+
+    if(me){
+      // egen rad: bubblan före avatar
+      row.appendChild(bubble);
+      row.appendChild(avatar);
+    }else{
+      row.appendChild(avatar);
+      row.appendChild(bubble);
+    }
+
+    return row;
+  }
+
+  function makeSystem(text, type = 'normal'){
+    const el = document.createElement('div');
+    el.className = 'system';
+    if(type === 'join') el.className += ' join';
+    if(type === 'remove') el.className += ' remove';
+    el.textContent = text;
+    return el;
+  }
+
+  // ====== Spelare ======
+  let abort = false;
+  let paused = false;
+  function setPaused(v){ paused = v; $('#btnPause').textContent = v ? '▶︎ Fortsätt' : '⏸︎ Pausa'; }
+
+  async function play(data){
+    abort = false; setPaused(false);
+    const chat = document.getElementById('chat');
+    chat.innerHTML = '';
+
+    $('#roomTag').textContent = data.room || '#kanal';
+
+    const byId = Object.fromEntries((data.participants||[]).map(p=>[p.id,p]));
+    const meId = data.me || null;
+
+    let cursor = new Date(data.startsAt || Date.now());
+
+    // Funktion för att hålla chatten i botten och ta bort gamla meddelanden
+    function addToChatAndScroll(element) {
+      chat.appendChild(element);
+      
+      // Ta bort gamla meddelanden om det blir för många (håll max ~50 meddelanden)
+      while(chat.children.length > 50) {
+        chat.removeChild(chat.firstChild);
+      }
+      
+      // Scrolla till botten
+      chat.scrollTop = chat.scrollHeight;
+    }
+
+    for(const step of (data.timeline||[])){
+      if(abort) return;
+
+      if(step.type === 'system'){
+        addToChatAndScroll(makeSystem(step.text));
+      }
+      else if(step.type === 'join'){
+        const p = byId[step.user] || { id: step.user, name: step.user };
+        const text = `${p.name || p.id} anslöt till chatten`;
+        addToChatAndScroll(makeSystem(text, 'join'));
+        const speed = parseFloat($('#speed').value)||1;
+        await waitWhile((step.delayMs || 1000) / speed);
+        cursor = new Date(cursor.getTime() + Math.max(10_000, (step.delayMs||1000)*2));
+      }
+      else if(step.type === 'remove'){
+        const removedBy = byId[step.removedBy] || { id: step.removedBy, name: step.removedBy };
+        const removedUser = byId[step.removedUser] || { id: step.removedUser, name: step.removedUser };
+        const text = `${removedBy.name || removedBy.id} tog bort ${removedUser.name || removedUser.id} från chatten`;
+        addToChatAndScroll(makeSystem(text, 'remove'));
+        const speed = parseFloat($('#speed').value)||1;
+        await waitWhile((step.delayMs || 1000) / speed);
+        cursor = new Date(cursor.getTime() + Math.max(10_000, (step.delayMs||1000)*2));
+      }
+      else if(step.type === 'typing'){
+        const p = byId[step.from] || { id: step.from, name: step.from, color: '#888' };
+        const row = makeRow({me: step.from===meId, p, typing:true});
+        addToChatAndScroll(row);
+        const speed = parseFloat($('#speed').value)||1;
+        await waitWhile(step.ms / speed);
+        row.remove();
+      }
+      else if(step.type === 'message'){
+        const p = byId[step.from] || { id: step.from, name: step.from, color: '#888' };
+        const row = makeRow({
+          me: step.from===meId, 
+          p, 
+          text: step.text, 
+          time: cursor, 
+          messageType: step.messageType || 'text',
+          mediaData: step.mediaData || null,
+          participants: data.participants
+        });
+        addToChatAndScroll(row);
+        const speed = parseFloat($('#speed').value)||1;
+        await waitWhile((step.delayMs || 500) / speed);
+        // öka klockan lite så det ser rimligt ut
+        cursor = new Date(cursor.getTime() + Math.max(30_000, (step.delayMs||500)*5));
+      }
+    }
+
+    if($('#chkLoop').checked && !abort){
+      await sleep(600);
+      play(data);
+    }
+  }
+
+  async function waitWhile(ms){
+    const start = performance.now();
+    while(performance.now() - start < ms){
+      if(abort) return;
+      if(paused){ await sleep(60); continue; }
+      await sleep(16);
+    }
+  }
+
+  // ====== UI-hooks ======
+  document.addEventListener('DOMContentLoaded', async () => {
+    const data = await loadData();
+    $('#btnRestart').addEventListener('click', ()=>{ abort = true; play(data); });
+    $('#btnPause').addEventListener('click', ()=> setPaused(!paused));
+    $('#speed').addEventListener('change', ()=>{});
+
+    play(data);
+  });
+  </script>
+</body>
+</html>
